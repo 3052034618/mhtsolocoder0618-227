@@ -7,8 +7,8 @@ import type {
   SubmitReviewRequest,
   RecurringService,
 } from '../types';
-import { MOCK_ORDERS, MOCK_CLEANERS, MOCK_CUSTOMERS } from '../mock';
-import { delay, generateId, generateOrderNo, calculatePrice, calculateCommission } from '../utils';
+import { MOCK_ORDERS, MOCK_CLEANERS, MOCK_CUSTOMERS, MOCK_RECURRING_SERVICES } from '../mock';
+import { delay, generateId, generateOrderNo, calculatePrice, calculateCommission, getFollowingOrderDate } from '../utils';
 
 let orders = [...MOCK_ORDERS];
 
@@ -420,4 +420,105 @@ export const cancelRecurringOrders = async (
     message: '关联订单已取消',
     data: null,
   };
+};
+
+export const generateNextRecurringOrder = async (
+  recurringServiceId: string
+): Promise<ApiResponse<Order | null>> => {
+  await delay(200);
+
+  const rs = MOCK_RECURRING_SERVICES.find((r) => r.id === recurringServiceId);
+  if (!rs || !rs.isActive) {
+    return { code: 200, message: '定期服务不存在或已取消', data: null };
+  }
+
+  const rsOrders = orders
+    .filter((o) => o.recurringServiceId === rs.id && o.status !== 'cancelled')
+    .sort((a, b) => new Date(b.scheduledTime).getTime() - new Date(a.scheduledTime).getTime());
+
+  if (rsOrders.length > 0) {
+    const lastOrder = rsOrders[0];
+    const lastDate = lastOrder.scheduledTime.slice(0, 10);
+    const pendingExists = rsOrders.some((o) =>
+      ['pending', 'assigned', 'accepted', 'checked_in', 'in_progress'].includes(o.status)
+    );
+    if (pendingExists) {
+      return { code: 200, message: '已有待执行订单', data: null };
+    }
+    const nextDate = getFollowingOrderDate(rs.frequency, lastDate, rs.preferredDay);
+    return createRecurringOrderWithDate(rs, nextDate);
+  }
+
+  return createRecurringOrderWithDate(rs, rs.nextOrderDate);
+};
+
+const createRecurringOrderWithDate = (
+  rs: RecurringService,
+  orderDate: string
+): Promise<ApiResponse<Order>> => {
+  return new Promise((resolve) => {
+    const customer = MOCK_CUSTOMERS.find((c) => c.id === rs.customerId);
+    if (!customer) {
+      resolve({ code: 404, message: '客户不存在', data: {} as Order });
+      return;
+    }
+
+    const price = calculatePrice(rs.serviceType, rs.houseArea);
+    const now = new Date().toISOString();
+    const scheduledTime = `${orderDate}T${rs.preferredTime || '10:00'}:00`;
+
+    const newOrder: Order = {
+      id: generateId(),
+      orderNo: generateOrderNo(),
+      customerId: customer.id,
+      customer,
+      serviceType: rs.serviceType,
+      address: rs.address,
+      houseArea: rs.houseArea,
+      scheduledTime,
+      price,
+      status: 'pending',
+      photos: [],
+      recurringServiceId: rs.id,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    orders = [newOrder, ...orders];
+
+    const rsIndex = MOCK_RECURRING_SERVICES.findIndex((r) => r.id === rs.id);
+    if (rsIndex !== -1) {
+      MOCK_RECURRING_SERVICES[rsIndex] = {
+        ...MOCK_RECURRING_SERVICES[rsIndex],
+        nextOrderDate: getFollowingOrderDate(rs.frequency, orderDate, rs.preferredDay),
+      };
+    }
+
+    resolve({
+      code: 200,
+      message: '自动续单创建成功',
+      data: newOrder,
+    });
+  });
+};
+
+export const syncAllRecurringOrders = async (): Promise<ApiResponse<Order[]>> => {
+  await delay(300);
+  const created: Order[] = [];
+
+  for (const rs of MOCK_RECURRING_SERVICES) {
+    if (!rs.isActive) continue;
+    const rsOrders = orders.filter(
+      (o) => o.recurringServiceId === rs.id && o.status !== 'cancelled'
+    );
+    const pendingExists = rsOrders.some((o) =>
+      ['pending', 'assigned', 'accepted', 'checked_in', 'in_progress'].includes(o.status)
+    );
+    if (!pendingExists) {
+      const result = await generateNextRecurringOrder(rs.id);
+      if (result.data) created.push(result.data);
+    }
+  }
+
+  return { code: 200, message: '同步完成', data: created };
 };

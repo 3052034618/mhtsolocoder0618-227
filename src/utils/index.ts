@@ -147,18 +147,70 @@ export const delay = (ms: number): Promise<void> => {
   return new Promise((resolve) => setTimeout(resolve, ms));
 };
 
-export const getNextOrderDate = (frequency: 'weekly' | 'biweekly' | 'monthly'): string => {
-  const date = new Date();
+export const getNextOrderDate = (
+  frequency: 'weekly' | 'biweekly' | 'monthly',
+  startDate: string = new Date().toISOString().slice(0, 10),
+  preferredDay?: number
+): string => {
+  const base = new Date(startDate);
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+
+  let next = new Date(base);
+  next.setHours(0, 0, 0, 0);
+
+  if (preferredDay !== undefined && preferredDay >= 1 && preferredDay <= 7) {
+    const dayOfWeek = next.getDay() === 0 ? 7 : next.getDay();
+    const diff = ((preferredDay - dayOfWeek) + 7) % 7;
+    next.setDate(next.getDate() + diff);
+  }
+
+  while (next <= now) {
+    switch (frequency) {
+      case 'weekly':
+        next.setDate(next.getDate() + 7);
+        break;
+      case 'biweekly':
+        next.setDate(next.getDate() + 14);
+        break;
+      case 'monthly':
+        next.setMonth(next.getMonth() + 1);
+        break;
+    }
+    if (preferredDay !== undefined && preferredDay >= 1 && preferredDay <= 7) {
+      const dayOfWeek = next.getDay() === 0 ? 7 : next.getDay();
+      const diff = ((preferredDay - dayOfWeek) + 7) % 7;
+      next.setDate(next.getDate() + diff);
+    }
+  }
+
+  return next.toISOString().slice(0, 10);
+};
+
+export const getFollowingOrderDate = (
+  frequency: 'weekly' | 'biweekly' | 'monthly',
+  currentDate: string,
+  preferredDay?: number
+): string => {
+  const next = new Date(currentDate);
+
   switch (frequency) {
     case 'weekly':
-      date.setDate(date.getDate() + 7);
+      next.setDate(next.getDate() + 7);
       break;
     case 'biweekly':
-      date.setDate(date.getDate() + 14);
+      next.setDate(next.getDate() + 14);
       break;
     case 'monthly':
-      date.setMonth(date.getMonth() + 1);
+      next.setMonth(next.getMonth() + 1);
       break;
   }
-  return date.toISOString().slice(0, 10);
+
+  if (preferredDay !== undefined && preferredDay >= 1 && preferredDay <= 7) {
+    const dayOfWeek = next.getDay() === 0 ? 7 : next.getDay();
+    const diff = ((preferredDay - dayOfWeek) + 7) % 7;
+    next.setDate(next.getDate() + diff);
+  }
+
+  return next.toISOString().slice(0, 10);
 };

@@ -65,11 +65,13 @@ export const createRecurringService = async (
 ): Promise<ApiResponse<RecurringService>> => {
   await delay(500);
 
+  const nextOrderDate = getNextOrderDate(data.frequency, data.startDate, data.preferredDay);
+
   const newService: RecurringService = {
     ...data,
     address: data.address || MOCK_CUSTOMERS.find(c => c.id === data.customerId)?.addresses[0] || {} as Address,
     id: generateId(),
-    nextOrderDate: getNextOrderDate(data.frequency),
+    nextOrderDate,
     isActive: true,
     createdAt: new Date().toISOString(),
   };

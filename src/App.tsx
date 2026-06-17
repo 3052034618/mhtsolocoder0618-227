@@ -73,7 +73,7 @@ export default function App() {
                   <Route path="" element={<DispatcherDashboard />} />
                   <Route path="orders" element={<OrderManagement />} />
                   <Route path="schedule" element={<ScheduleBoard />} />
-                  <Route path="bad-reviews" element={<ReviewManagement />} />
+                  <Route path="reviews" element={<ReviewManagement />} />
                   <Route path="*" element={<Navigate to="/dispatcher" replace />} />
                 </Routes>
               </AppRoute>

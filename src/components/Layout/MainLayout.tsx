@@ -35,7 +35,7 @@ const navItems = {
     { path: '/dispatcher', label: '调度中心', icon: LayoutDashboard },
     { path: '/dispatcher/orders', label: '订单管理', icon: ClipboardList },
     { path: '/dispatcher/schedule', label: '排班看板', icon: Calendar },
-    { path: '/dispatcher/bad-reviews', label: '差评处理', icon: AlertTriangle },
+    { path: '/dispatcher/reviews', label: '差评处理', icon: AlertTriangle },
   ],
   cleaner: [
     { path: '/cleaner', label: '工作台', icon: Home },

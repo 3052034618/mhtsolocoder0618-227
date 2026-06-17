@@ -16,6 +16,8 @@ import {
   createRecurringOrder,
   cancelRecurringOrders,
   handleBadReview as handleBadReviewApi,
+  generateNextRecurringOrder as generateNextRecurringOrderApi,
+  syncAllRecurringOrders as syncAllRecurringOrdersApi,
 } from '../services/orderService';
 
 interface HandleBadReviewRequest {
@@ -50,6 +52,8 @@ interface OrderState {
   handleBadReview: (data: HandleBadReviewRequest) => Promise<void>;
   createOrderFromRecurring: (recurringService: RecurringService) => Promise<Order | null>;
   cancelOrdersByRecurringId: (recurringServiceId: string) => Promise<void>;
+  generateNextRecurringOrder: (recurringServiceId: string) => Promise<Order | null>;
+  syncAllRecurringOrders: () => Promise<Order[]>;
   clearCurrentOrder: () => void;
 }
 
@@ -84,6 +88,11 @@ export const useOrderStore = create<OrderState>()(
               loading: false,
             };
           });
+          try {
+            await get().syncAllRecurringOrders();
+          } catch (e) {
+            // ignore sync error
+          }
         } catch (error) {
           set({ error: '获取订单列表失败', loading: false });
         }
@@ -200,14 +209,20 @@ export const useOrderStore = create<OrderState>()(
         set({ loading: true, error: null });
         try {
           const response = await completeOrder(orderId);
+          const completedOrder = response.data;
           set((state) => ({
             orders: state.orders.map((o) =>
-              o.id === orderId ? response.data : o
+              o.id === orderId ? completedOrder : o
             ),
             currentOrder:
-              state.currentOrder?.id === orderId ? response.data : state.currentOrder,
+              state.currentOrder?.id === orderId ? completedOrder : state.currentOrder,
             loading: false,
           }));
+          if (completedOrder.recurringServiceId) {
+            setTimeout(() => {
+              get().generateNextRecurringOrder(completedOrder.recurringServiceId!);
+            }, 500);
+          }
         } catch (error) {
           set({ error: '完成订单失败', loading: false });
         }
@@ -362,6 +377,38 @@ export const useOrderStore = create<OrderState>()(
           }));
         } catch (error) {
           set({ error: '取消关联订单失败', loading: false });
+        }
+      },
+
+      generateNextRecurringOrder: async (recurringServiceId) => {
+        try {
+          const response = await generateNextRecurringOrderApi(recurringServiceId);
+          if (response.data) {
+            set((state) => ({
+              orders: [response.data!, ...state.orders],
+            }));
+          }
+          return response.data;
+        } catch (error) {
+          set({ error: '生成续单失败' });
+          return null;
+        }
+      },
+
+      syncAllRecurringOrders: async () => {
+        try {
+          const response = await syncAllRecurringOrdersApi();
+          if (response.data && response.data.length > 0) {
+            set((state) => {
+              const existingIds = new Set(state.orders.map((o) => o.id));
+              const newOrders = response.data!.filter((o) => !existingIds.has(o.id));
+              return { orders: [...newOrders, ...state.orders] };
+            });
+          }
+          return response.data || [];
+        } catch (error) {
+          set({ error: '同步续单失败' });
+          return [];
         }
       },
 

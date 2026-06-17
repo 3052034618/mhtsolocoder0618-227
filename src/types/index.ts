@@ -82,6 +82,7 @@ export interface Review {
   handled?: boolean;
   handlerNote?: string;
   handlerId?: string;
+  action?: string;
 }
 
 export interface Order {

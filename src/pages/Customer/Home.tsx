@@ -87,7 +87,7 @@ export const CustomerHome: React.FC = () => {
               </div>
             </div>
             <button
-              onClick={() => navigate(`/customer/order/${upcomingOrder.id}`)}
+              onClick={() => navigate(`/customer/orders/${upcomingOrder.id}`)}
               className="px-6 py-3 bg-white/20 hover:bg-white/30 rounded-xl font-medium transition-colors flex items-center gap-2"
             >
               查看详情
@@ -162,7 +162,7 @@ export const CustomerHome: React.FC = () => {
         ) : myOrders.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {myOrders.slice(0, 3).map((order) => (
-              <OrderCard key={order.id} order={order} />
+              <OrderCard key={order.id} order={order} role="customer" />
             ))}
           </div>
         ) : (

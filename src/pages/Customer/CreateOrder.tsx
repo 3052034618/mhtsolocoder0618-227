@@ -88,7 +88,7 @@ export const CreateOrder: React.FC = () => {
       });
       setSuccess(true);
       setTimeout(() => {
-        navigate(`/customer/order/${order.id}`);
+        navigate(`/customer/orders/${order.id}`);
       }, 2000);
     } catch (error) {
       console.error('Create order failed:', error);

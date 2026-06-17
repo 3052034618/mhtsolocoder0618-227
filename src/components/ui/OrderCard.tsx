@@ -13,6 +13,7 @@ interface OrderCardProps {
   actionLabel?: string;
   compact?: boolean;
   className?: string;
+  role?: 'customer' | 'cleaner' | 'dispatcher' | 'admin';
 }
 
 export const OrderCard: React.FC<OrderCardProps> = ({
@@ -22,6 +23,7 @@ export const OrderCard: React.FC<OrderCardProps> = ({
   actionLabel = '查看详情',
   compact = false,
   className,
+  role,
 }) => {
   const navigate = useNavigate();
   const serviceConfig = SERVICE_CONFIG[order.serviceType];
@@ -30,6 +32,14 @@ export const OrderCard: React.FC<OrderCardProps> = ({
   const handleClick = () => {
     if (onAction) {
       onAction(order);
+      return;
+    }
+    if (role === 'customer') {
+      navigate(`/customer/orders/${order.id}`);
+    } else if (role === 'cleaner') {
+      navigate(`/cleaner/orders/${order.id}`);
+    } else if (role === 'dispatcher' || role === 'admin') {
+      navigate(`/dispatcher/orders/${order.id}`);
     } else {
       const basePath = order.cleanerId ? '/cleaner/orders' : '/customer/orders';
       navigate(`${basePath}/${order.id}`);

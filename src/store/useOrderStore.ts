@@ -317,6 +317,7 @@ export const useOrderStore = create<OrderState>()(
                     handled: true,
                     handlerNote: data.note,
                     handlerId: data.handlerId,
+                    action: data.action,
                   },
                 };
               }
@@ -331,6 +332,7 @@ export const useOrderStore = create<OrderState>()(
                       handled: true,
                       handlerNote: data.note,
                       handlerId: data.handlerId,
+                      action: data.action,
                     },
                   }
                 : state.currentOrder,

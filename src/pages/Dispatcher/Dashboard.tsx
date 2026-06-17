@@ -344,7 +344,7 @@ export const DispatcherDashboard: React.FC = () => {
                 {badReviews.slice(0, 3).map((order) => (
                   <div
                     key={order.id}
-                    onClick={() => navigate('/dispatcher/reviews')}
+                    onClick={() => navigate(`/dispatcher/reviews?orderId=${order.id}`)}
                     className="p-3 bg-white rounded-xl cursor-pointer hover:bg-danger-50 transition-colors"
                   >
                     <div className="flex items-center justify-between mb-1">

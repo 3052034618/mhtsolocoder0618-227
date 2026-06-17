@@ -1,358 +1,496 @@
-import React, { useEffect, useState } from 'react';
-import { useForm } from 'react-hook-form';
+import React, { useEffect, useState, useRef } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
-  Star,
-  User,
-  Clock,
   CheckCircle,
+  Clock,
+  User,
+  MapPin,
   MessageSquare,
   Send,
-  Filter,
-  Phone,
-  MapPin,
+  ChevronDown,
+  ChevronUp,
+  XCircle,
+  RefreshCw,
 } from 'lucide-react';
 import { useOrderStore } from '../../store/useOrderStore';
-import { useUserStore } from '../../store/useUserStore';
 import { useAuthStore } from '../../store/useAuthStore';
-import { StatusBadge } from '../../components/ui/StatusBadge';
-import { SERVICE_CONFIG } from '../../types';
+import { StarRating } from '../../components/ui/StarRating';
 import { formatDate, cn } from '../../utils';
+import { SERVICE_CONFIG } from '../../types';
 
-interface HandleForm {
-  note: string;
-  action: 'refund' | 're_service' | 'compensate' | 'other';
-}
+type TabType = 'pending' | 'handled';
 
 export const ReviewManagement: React.FC = () => {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { orders, fetchOrders, handleBadReview, loading } = useOrderStore();
-  const { customers, cleaners, fetchCustomers, fetchCleaners } = useUserStore();
   const { user } = useAuthStore();
-  const [filter, setFilter] = useState<'all' | 'pending' | 'handled'>('pending');
-  const [selectedOrder, setSelectedOrder] = useState<any>(null);
-
-  const { register, handleSubmit, reset, watch, formState: { errors } } = useForm<HandleForm>({
-    defaultValues: {
-      note: '',
-      action: 'other',
-    },
-  });
-
-  const selectedAction = watch('action');
+  const [activeTab, setActiveTab] = useState<TabType>('pending');
+  const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
+  const [selectedAction, setSelectedAction] = useState<'refund' | 're_service' | 'compensate' | 'other'>('re_service');
+  const [note, setNote] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [highlightedOrderId, setHighlightedOrderId] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     fetchOrders();
-    fetchCustomers();
-    fetchCleaners();
   }, []);
 
-  const reviewedOrders = orders.filter((o) => o.review);
-  const badReviews = reviewedOrders.filter((o) => o.review!.rating <= 2);
+  useEffect(() => {
+    const orderId = searchParams.get('orderId');
+    const reviewId = searchParams.get('reviewId');
 
-  const filteredReviews = badReviews.filter((order) => {
-    if (filter === 'pending') return !order.review!.handled;
-    if (filter === 'handled') return order.review!.handled;
-    return true;
-  });
+    if (orderId || reviewId) {
+      const targetOrder = orders.find(
+        (o) => o.id === orderId || o.review?.id === reviewId
+      );
+      if (targetOrder && targetOrder.review) {
+        const isHandled = targetOrder.review.handled;
+        setActiveTab(isHandled ? 'handled' : 'pending');
+        setExpandedOrderId(targetOrder.id);
+        setHighlightedOrderId(targetOrder.id);
 
-  const getCustomer = (id: string) => customers.find((c) => c.id === id);
-  const getCleaner = (id?: string) => (id ? cleaners.find((c) => c.id === id) : undefined);
+        setTimeout(() => {
+          const el = document.getElementById(`review-order-${targetOrder.id}`);
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }, 200);
 
-  const onSubmit = async (data: HandleForm) => {
-    if (!selectedOrder || !user) return;
-    try {
-      await handleBadReview({
-        reviewId: selectedOrder.review!.id,
-        action: data.action,
-        note: data.note,
-        handlerId: user.id,
-      });
-      setSelectedOrder(null);
-      reset();
-    } catch (error) {
-      console.error('Handle review failed:', error);
+        setTimeout(() => {
+          setHighlightedOrderId(null);
+        }, 3000);
+      }
+    }
+  }, [searchParams, orders]);
+
+  const badReviewOrders = orders.filter(
+    (o) => o.review && o.review.isBadReview
+  );
+
+  const pendingReviews = badReviewOrders.filter((o) => !o.review?.handled);
+  const handledReviews = badReviewOrders.filter((o) => o.review?.handled);
+
+  const displayedOrders = activeTab === 'pending' ? pendingReviews : handledReviews;
+
+  const toggleExpand = (orderId: string) => {
+    if (expandedOrderId === orderId) {
+      setExpandedOrderId(null);
+    } else {
+      setExpandedOrderId(orderId);
+      const order = orders.find((o) => o.id === orderId);
+      if (order?.review?.handled) {
+        setSelectedAction('re_service');
+        setNote('');
+      }
     }
   };
 
-  const pendingCount = badReviews.filter((o) => !o.review!.handled).length;
-  const handledCount = badReviews.filter((o) => o.review!.handled).length;
+  const handleSubmit = async (orderId: string) => {
+    const order = orders.find((o) => o.id === orderId);
+    if (!order?.review) return;
+
+    setSubmitting(true);
+    try {
+      await handleBadReview({
+        reviewId: order.review.id,
+        action: selectedAction,
+        note,
+        handlerId: user?.id || 'd1',
+      });
+      setExpandedOrderId(null);
+      setNote('');
+      setSubmitting(false);
+    } catch (error) {
+      console.error('Handle bad review failed:', error);
+      setSubmitting(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-neutral-800">差评管理</h2>
+          <h2 className="text-2xl font-bold text-neutral-800">差评处理</h2>
           <p className="text-neutral-500">处理客户差评，提升服务质量</p>
         </div>
+        <button
+          onClick={() => fetchOrders()}
+          className="btn-secondary flex items-center gap-2"
+        >
+          <RefreshCw className="w-4 h-4" />
+          刷新
+        </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="card">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-danger-100 flex items-center justify-center">
-              <AlertTriangle className="w-6 h-6 text-danger-600" />
+      <div className="grid grid-cols-2 gap-4">
+        <div
+          className={cn(
+            'card cursor-pointer transition-all',
+            activeTab === 'pending' && 'ring-2 ring-danger-400'
+          )}
+          onClick={() => setActiveTab('pending')}
+        >
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-danger-100 flex items-center justify-center">
+              <Clock className="w-7 h-7 text-danger-600" />
             </div>
             <div>
-              <p className="text-3xl font-bold text-danger-600">{badReviews.length}</p>
-              <p className="text-sm text-neutral-500">总差评数</p>
+              <p className="text-3xl font-bold text-danger-600">
+                {pendingReviews.length}
+              </p>
+              <p className="text-neutral-500">待处理差评</p>
             </div>
           </div>
         </div>
-        <div className="card">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-amber-100 flex items-center justify-center">
-              <Clock className="w-6 h-6 text-amber-600" />
+
+        <div
+          className={cn(
+            'card cursor-pointer transition-all',
+            activeTab === 'handled' && 'ring-2 ring-primary-400'
+          )}
+          onClick={() => setActiveTab('handled')}
+        >
+          <div className="flex items-center gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-primary-100 flex items-center justify-center">
+              <CheckCircle className="w-7 h-7 text-primary-600" />
             </div>
             <div>
-              <p className="text-3xl font-bold text-amber-600">{pendingCount}</p>
-              <p className="text-sm text-neutral-500">待处理</p>
-            </div>
-          </div>
-        </div>
-        <div className="card">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-green-100 flex items-center justify-center">
-              <CheckCircle className="w-6 h-6 text-green-600" />
-            </div>
-            <div>
-              <p className="text-3xl font-bold text-green-600">{handledCount}</p>
-              <p className="text-sm text-neutral-500">已处理</p>
+              <p className="text-3xl font-bold text-primary-600">
+                {handledReviews.length}
+              </p>
+              <p className="text-neutral-500">已处理差评</p>
             </div>
           </div>
         </div>
       </div>
 
-      <div className="bg-white rounded-2xl shadow-card p-2">
-        <div className="flex gap-2">
-          {[
-            { value: 'pending', label: '待处理', count: pendingCount },
-            { value: 'handled', label: '已处理', count: handledCount },
-            { value: 'all', label: '全部', count: badReviews.length },
-          ].map((f) => (
-            <button
-              key={f.value}
-              onClick={() => setFilter(f.value as any)}
+      <div className="bg-white rounded-2xl shadow-card">
+        <div className="flex border-b border-neutral-100">
+          <button
+            className={cn(
+              'px-6 py-4 font-medium transition-colors relative',
+              activeTab === 'pending'
+                ? 'text-danger-600'
+                : 'text-neutral-500 hover:text-neutral-700'
+            )}
+            onClick={() => setActiveTab('pending')}
+          >
+            待处理
+            <span
               className={cn(
-                'px-4 py-2 rounded-xl text-sm font-medium transition-all flex items-center gap-2',
-                filter === f.value
-                  ? 'bg-primary-500 text-white'
-                  : 'text-neutral-600 hover:bg-neutral-100'
+                'ml-2 px-2 py-0.5 rounded-full text-xs',
+                activeTab === 'pending'
+                  ? 'bg-danger-100 text-danger-600'
+                  : 'bg-neutral-100 text-neutral-500'
               )}
             >
-              {f.label}
-              <span
-                className={cn(
-                  'px-2 py-0.5 rounded-full text-xs',
-                  filter === f.value
-                    ? 'bg-white/20 text-white'
-                    : 'bg-neutral-100 text-neutral-500'
-                )}
-              >
-                {f.count}
-              </span>
-            </button>
-          ))}
+              {pendingReviews.length}
+            </span>
+            {activeTab === 'pending' && (
+              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-danger-500" />
+            )}
+          </button>
+          <button
+            className={cn(
+              'px-6 py-4 font-medium transition-colors relative',
+              activeTab === 'handled'
+                ? 'text-primary-600'
+                : 'text-neutral-500 hover:text-neutral-700'
+            )}
+            onClick={() => setActiveTab('handled')}
+          >
+            已处理
+            <span
+              className={cn(
+                'ml-2 px-2 py-0.5 rounded-full text-xs',
+                activeTab === 'handled'
+                  ? 'bg-primary-100 text-primary-600'
+                  : 'bg-neutral-100 text-neutral-500'
+              )}
+            >
+              {handledReviews.length}
+            </span>
+            {activeTab === 'handled' && (
+              <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-primary-500" />
+            )}
+          </button>
         </div>
-      </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="space-y-4">
-          {filteredReviews.length > 0 ? (
-            filteredReviews.map((order) => {
-              const customer = getCustomer(order.customerId);
-              const cleaner = getCleaner(order.cleanerId);
-              const isSelected = selectedOrder?.id === order.id;
+        <div ref={scrollRef} className="p-4">
+          {loading ? (
+            <div className="flex items-center justify-center py-16">
+              <div className="w-8 h-8 border-4 border-danger-200 border-t-danger-500 rounded-full animate-spin" />
+            </div>
+          ) : displayedOrders.length > 0 ? (
+            <div className="space-y-3">
+              {displayedOrders.map((order) => {
+                const review = order.review!;
+                const isExpanded = expandedOrderId === order.id;
+                const isHighlighted = highlightedOrderId === order.id;
 
-              return (
-                <div
-                  key={order.id}
-                  onClick={() => setSelectedOrder(order)}
-                  className={cn(
-                    'card cursor-pointer transition-all',
-                    isSelected && 'ring-2 ring-primary-500'
-                  )}
-                >
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 rounded-full bg-primary-100 flex items-center justify-center overflow-hidden">
-                        {customer?.avatar ? (
-                          <img
-                            src={customer.avatar}
-                            alt={customer.name}
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          <User className="w-6 h-6 text-primary-600" />
-                        )}
-                      </div>
-                      <div>
-                        <p className="font-medium text-neutral-800">{customer?.name}</p>
-                        <p className="text-sm text-neutral-500">{order.orderNo}</p>
-                      </div>
-                    </div>
-                    {order.review!.handled ? (
-                      <span className="px-3 py-1 bg-green-100 text-green-600 rounded-full text-sm font-medium">
-                        已处理
-                      </span>
-                    ) : (
-                      <span className="px-3 py-1 bg-amber-100 text-amber-600 rounded-full text-sm font-medium">
-                        待处理
-                      </span>
+                return (
+                  <div
+                    key={order.id}
+                    id={`review-order-${order.id}`}
+                    className={cn(
+                      'border rounded-xl overflow-hidden transition-all duration-300',
+                      isHighlighted
+                        ? 'border-primary-400 ring-4 ring-primary-100 bg-primary-50/50'
+                        : 'border-neutral-200 hover:border-neutral-300',
+                      activeTab === 'pending' && !isHighlighted && 'border-danger-200 hover:border-danger-300'
                     )}
-                  </div>
-
-                  <div className="flex items-center gap-1 mb-3">
-                    {[...Array(5)].map((_, i) => (
-                      <Star
-                        key={i}
-                        className={cn(
-                          'w-4 h-4',
-                          i < order.review!.rating
-                            ? 'text-accent-500 fill-accent-500'
-                            : 'text-neutral-200'
-                        )}
-                      />
-                    ))}
-                    <span className="ml-2 font-bold text-accent-600">
-                      {order.review!.rating}.0
-                    </span>
-                  </div>
-
-                  <p className="text-neutral-600 mb-4">{order.review!.content}</p>
-
-                  <div className="flex items-center justify-between text-sm">
-                    <div className="flex items-center gap-4">
-                      <span className="text-neutral-500">
-                        {SERVICE_CONFIG[order.serviceType].name}
-                      </span>
-                      <span className="text-neutral-400">|</span>
-                      <span className="text-neutral-500">{formatDate(order.review!.createdAt)}</span>
-                    </div>
-                    <span className="text-primary-600 font-medium">¥{order.price}</span>
-                  </div>
-
-                  {cleaner && (
-                    <div className="mt-4 pt-4 border-t border-neutral-100">
-                      <p className="text-sm text-neutral-500 mb-2">服务保洁员</p>
-                      <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 rounded-full bg-accent-100 flex items-center justify-center overflow-hidden">
-                          {cleaner.avatar ? (
-                            <img
-                              src={cleaner.avatar}
-                              alt={cleaner.name}
-                              className="w-full h-full object-cover"
-                            />
+                  >
+                    <div
+                      className="p-4 cursor-pointer"
+                      onClick={() => toggleExpand(order.id)}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-start gap-4">
+                          <div
+                            className={cn(
+                              'w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0',
+                              review.handled ? 'bg-primary-100' : 'bg-danger-100'
+                            )}
+                          >
+                            {review.handled ? (
+                              <CheckCircle className="w-6 h-6 text-primary-600" />
+                            ) : (
+                              <AlertTriangle className="w-6 h-6 text-danger-600" />
+                            )}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="font-semibold text-neutral-800">
+                                {order.customer.name}
+                              </span>
+                              <span className="text-sm text-neutral-500">
+                                {SERVICE_CONFIG[order.serviceType].name}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-3 text-sm text-neutral-500 mb-2">
+                              <span className="flex items-center gap-1">
+                                <MapPin className="w-4 h-4" />
+                                {order.address.detail}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <StarRating value={review.rating} size="sm" readOnly />
+                              <span className="text-sm text-neutral-400">
+                                {formatDate(review.createdAt)}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {review.handled ? (
+                            <span className="px-3 py-1 bg-primary-100 text-primary-600 rounded-full text-sm font-medium">
+                              已处理
+                            </span>
                           ) : (
-                            <User className="w-4 h-4 text-accent-600" />
+                            <span className="px-3 py-1 bg-danger-100 text-danger-600 rounded-full text-sm font-medium">
+                              待处理
+                            </span>
+                          )}
+                          {isExpanded ? (
+                            <ChevronUp className="w-5 h-5 text-neutral-400" />
+                          ) : (
+                            <ChevronDown className="w-5 h-5 text-neutral-400" />
                           )}
                         </div>
-                        <span className="font-medium text-neutral-700">{cleaner.name}</span>
-                        <div className="flex items-center gap-1 ml-2">
-                          <Star className="w-3 h-3 text-accent-500 fill-accent-500" />
-                          <span className="text-sm text-neutral-600">{cleaner.rating}</span>
-                        </div>
                       </div>
                     </div>
-                  )}
-                </div>
-              );
-            })
+
+                    {isExpanded && (
+                      <div className="px-4 pb-4 border-t border-neutral-100 pt-4 animate-fade-in">
+                        <div className="bg-neutral-50 rounded-xl p-4 mb-4">
+                          <div className="flex items-center gap-2 mb-2">
+                            <MessageSquare className="w-4 h-4 text-neutral-400" />
+                            <span className="text-sm font-medium text-neutral-700">
+                              客户评价
+                            </span>
+                          </div>
+                          <p className="text-neutral-600">{review.content}</p>
+                        </div>
+
+                        {order.cleaner && (
+                          <div className="flex items-center gap-3 p-3 bg-neutral-50 rounded-xl mb-4">
+                            <img
+                              src={order.cleaner.avatar}
+                              alt={order.cleaner.name}
+                              className="w-10 h-10 rounded-full object-cover"
+                            />
+                            <div>
+                              <p className="font-medium text-neutral-800">
+                                {order.cleaner.name}
+                              </p>
+                              <div className="flex items-center gap-2">
+                                <StarRating
+                                  value={order.cleaner.rating}
+                                  size="sm"
+                                  readOnly
+                                />
+                                <span className="text-xs text-neutral-500">
+                                  {order.cleaner.totalOrders}单
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {review.handled ? (
+                          <div className="bg-primary-50 rounded-xl p-4 border border-primary-200">
+                            <div className="flex items-center gap-2 mb-3">
+                              <CheckCircle className="w-5 h-5 text-primary-600" />
+                              <span className="font-medium text-primary-700">
+                                处理结果
+                              </span>
+                            </div>
+                            <div className="space-y-2">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm text-neutral-500">
+                                  处理方式：
+                                </span>
+                                <span className="text-sm font-medium text-neutral-800">
+                                  {review.action === 're_service' && '重新清洁'}
+                                  {review.action === 'refund' && '部分退款'}
+                                  {review.action === 'compensate' && '致歉补偿'}
+                                  {review.action === 'other' && '其他处理'}
+                                  {!review.action && '致歉补偿'}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-sm text-neutral-500">
+                                  处理备注：
+                                </span>
+                                <p className="text-sm text-neutral-700 mt-1">
+                                  {review.handlerNote || '无'}
+                                </p>
+                              </div>
+                              {review.handlerId && (
+                                <div className="text-xs text-neutral-400">
+                                  处理人：调度员
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="space-y-4">
+                            <div>
+                              <label className="label">处理方式</label>
+                              <div className="grid grid-cols-2 gap-3">
+                                {([
+                                  {
+                                    value: 're_service' as const,
+                                    label: '重新清洁',
+                                    desc: '安排再次上门清洁',
+                                  },
+                                  {
+                                    value: 'refund' as const,
+                                    label: '部分退款',
+                                    desc: '退还部分服务费用',
+                                  },
+                                  {
+                                    value: 'compensate' as const,
+                                    label: '致歉补偿',
+                                    desc: '联系客户致歉补偿',
+                                  },
+                                  {
+                                    value: 'other' as const,
+                                    label: '其他处理',
+                                    desc: '其他处理方式',
+                                  },
+                                ]).map((action) => (
+                                  <div
+                                    key={action.value}
+                                    onClick={() => setSelectedAction(action.value)}
+                                    className={cn(
+                                      'p-3 border-2 rounded-xl cursor-pointer transition-all',
+                                      selectedAction === action.value
+                                        ? 'border-primary-500 bg-primary-50'
+                                        : 'border-neutral-200 hover:border-primary-200'
+                                    )}
+                                  >
+                                    <p className="font-medium text-neutral-800 text-sm">
+                                      {action.label}
+                                    </p>
+                                    <p className="text-xs text-neutral-500 mt-1">
+                                      {action.desc}
+                                    </p>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div>
+                              <label className="label">
+                                <MessageSquare className="w-4 h-4 inline mr-2" />
+                                处理备注
+                              </label>
+                              <textarea
+                                value={note}
+                                onChange={(e) => setNote(e.target.value)}
+                                placeholder="请输入处理备注..."
+                                className="input-field min-h-[100px] resize-none"
+                              />
+                            </div>
+
+                            <div className="flex gap-3">
+                              <button
+                                onClick={() => {
+                                  setExpandedOrderId(null);
+                                  setNote('');
+                                }}
+                                className="flex-1 btn-secondary"
+                              >
+                                取消
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleSubmit(order.id);
+                                }}
+                                disabled={submitting}
+                                className="flex-1 btn-primary flex items-center justify-center gap-2"
+                              >
+                                {submitting ? (
+                                  <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                ) : (
+                                  <Send className="w-4 h-4" />
+                                )}
+                                提交处理
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           ) : (
-            <div className="card text-center py-16">
-              <CheckCircle className="w-12 h-12 text-green-400 mx-auto mb-3" />
-              <p className="text-neutral-500">没有{filter === 'pending' ? '待处理的' : filter === 'handled' ? '已处理的' : ''}差评</p>
+            <div className="text-center py-16">
+              <div className="w-16 h-16 bg-neutral-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                {activeTab === 'pending' ? (
+                  <CheckCircle className="w-8 h-8 text-green-500" />
+                ) : (
+                  <XCircle className="w-8 h-8 text-neutral-400" />
+                )}
+              </div>
+              <h3 className="text-lg font-semibold text-neutral-800 mb-2">
+                {activeTab === 'pending' ? '暂无待处理差评' : '暂无已处理差评'}
+              </h3>
+              <p className="text-neutral-500">
+                {activeTab === 'pending'
+                  ? '太棒了！所有差评都已处理完毕'
+                  : '还没有处理过差评记录'}
+              </p>
             </div>
           )}
         </div>
-
-        {selectedOrder && !selectedOrder.review?.handled && (
-          <div className="card h-fit animate-fade-in">
-            <h3 className="text-lg font-bold text-neutral-800 mb-6">处理差评</h3>
-
-            <div className="bg-danger-50 rounded-xl p-4 mb-6">
-              <div className="flex items-start gap-3">
-                <AlertTriangle className="w-5 h-5 text-danger-600 flex-shrink-0 mt-0.5" />
-                <div>
-                  <p className="font-medium text-danger-800 mb-1">差评预警</p>
-                  <p className="text-sm text-danger-700">
-                    客户对订单 {selectedOrder.orderNo} 给出了{' '}
-                    <span className="font-bold">{selectedOrder.review?.rating}星</span> 差评，
-                    请及时介入处理。
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-              <div>
-                <label className="label">处理方式</label>
-                <div className="grid grid-cols-2 gap-3">
-                  {[
-                    { value: 'refund', label: '退款', desc: '全额或部分退款' },
-                    { value: 're_service', label: '重派服务', desc: '安排重新服务' },
-                    { value: 'compensate', label: '补偿', desc: '优惠券/现金补偿' },
-                    { value: 'other', label: '其他', desc: '其他处理方式' },
-                  ].map((action) => (
-                    <div
-                      key={action.value}
-                      onClick={() =>
-                        register('action').onChange({ target: { value: action.value } })
-                      }
-                      className={cn(
-                        'p-3 border-2 rounded-xl cursor-pointer transition-all',
-                        selectedAction === action.value
-                          ? 'border-primary-500 bg-primary-50'
-                          : 'border-neutral-200 hover:border-primary-200'
-                      )}
-                    >
-                      <p className="font-medium text-neutral-800">{action.label}</p>
-                      <p className="text-xs text-neutral-500">{action.desc}</p>
-                    </div>
-                  ))}
-                </div>
-                <input type="hidden" {...register('action')} />
-              </div>
-
-              <div>
-                <label className="label">处理备注</label>
-                <textarea
-                  className="input-field min-h-[100px]"
-                  placeholder="请记录处理内容和沟通结果..."
-                  {...register('note', { required: '请填写处理备注' })}
-                />
-                {errors.note && (
-                  <p className="mt-2 text-sm text-danger-600">{errors.note.message}</p>
-                )}
-              </div>
-
-              <div className="flex gap-3">
-                <button
-                  type="button"
-                  onClick={() => setSelectedOrder(null)}
-                  className="flex-1 btn-secondary"
-                >
-                  取消
-                </button>
-                <button type="submit" disabled={loading} className="flex-1 btn-primary">
-                  {loading ? '处理中...' : '确认处理'}
-                </button>
-              </div>
-            </form>
-          </div>
-        )}
-
-        {selectedOrder?.review?.handled && (
-          <div className="card h-fit">
-            <h3 className="text-lg font-bold text-neutral-800 mb-4">处理记录</h3>
-            <div className="bg-green-50 rounded-xl p-4 mb-4">
-              <div className="flex items-center gap-2 mb-2">
-                <CheckCircle className="w-5 h-5 text-green-600" />
-                <span className="font-medium text-green-800">已处理</span>
-              </div>
-            </div>
-            <p className="text-neutral-600">{selectedOrder.review.handlerNote}</p>
-          </div>
-        )}
       </div>
     </div>
   );

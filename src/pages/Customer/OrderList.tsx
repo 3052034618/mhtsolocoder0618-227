@@ -109,7 +109,8 @@ export const OrderList: React.FC = () => {
             <OrderCard
               key={order.id}
               order={order}
-              onAction={() => navigate(`/customer/order/${order.id}`)}
+              role="customer"
+              onAction={() => navigate(`/customer/orders/${order.id}`)}
             />
           ))}
         </div>

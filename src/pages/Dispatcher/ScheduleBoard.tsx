@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Calendar,
   ChevronLeft,
@@ -10,6 +11,11 @@ import {
   CheckCircle,
   XCircle,
   AlertCircle,
+  Sparkles,
+  Droplets,
+  Truck,
+  RefreshCw,
+  ArrowRight,
 } from 'lucide-react';
 import { useOrderStore } from '../../store/useOrderStore';
 import { useUserStore } from '../../store/useUserStore';
@@ -18,8 +24,16 @@ import { SERVICE_CONFIG } from '../../types';
 import { formatDate, cn } from '../../utils';
 import { addDays, startOfWeek, format } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
+import type { Order, ServiceType } from '../../types';
+
+const ServiceIcon: React.FC<{ type: ServiceType; className?: string }> = ({ type, className }) => {
+  if (type === 'daily') return <Sparkles className={className} />;
+  if (type === 'deep') return <Droplets className={className} />;
+  return <Truck className={className} />;
+};
 
 export const ScheduleBoard: React.FC = () => {
+  const navigate = useNavigate();
   const { orders, fetchOrders } = useOrderStore();
   const { cleaners, fetchCleaners } = useUserStore();
   const [currentWeekStart, setCurrentWeekStart] = useState(startOfWeek(new Date(), { weekStartsOn: 1 }));
@@ -31,6 +45,10 @@ export const ScheduleBoard: React.FC = () => {
   }, []);
 
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(currentWeekStart, i));
+
+  const pendingOrders = orders.filter(
+    (o) => o.status === 'pending'
+  );
 
   const getCleanerOrdersForDate = (cleanerId: string, date: Date) => {
     const dateStr = date.toISOString().slice(0, 10);
@@ -78,6 +96,21 @@ export const ScheduleBoard: React.FC = () => {
     ? cleaners.filter((c) => c.id === selectedCleaner)
     : cleaners;
 
+  const getPendingDateOrders = (date: Date) => {
+    const dateStr = date.toISOString().slice(0, 10);
+    return pendingOrders.filter((o) => o.scheduledTime.startsWith(dateStr));
+  };
+
+  const goToDispatch = (orderId?: string) => {
+    navigate('/dispatcher');
+    if (orderId) {
+      setTimeout(() => {
+        const el = document.getElementById(`order-${orderId}`);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 300);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -100,6 +133,94 @@ export const ScheduleBoard: React.FC = () => {
           </select>
         </div>
       </div>
+
+      {pendingOrders.length > 0 && (
+        <div className="card border-2 border-dashed border-accent-300 bg-accent-50/50">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-accent-100 flex items-center justify-center">
+                <AlertCircle className="w-5 h-5 text-accent-600" />
+              </div>
+              <div>
+                <h3 className="font-bold text-neutral-800">待派单订单</h3>
+                <p className="text-sm text-neutral-500">
+                  共 {pendingOrders.length} 条订单等待分配保洁员
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => navigate('/dispatcher')}
+              className="px-4 py-2 bg-accent-500 hover:bg-accent-600 text-white rounded-xl text-sm font-medium transition-colors flex items-center gap-2"
+            >
+              去派单
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {pendingOrders.slice(0, 6).map((order) => (
+              <div
+                key={order.id}
+                id={`pending-${order.id}`}
+                onClick={() => goToDispatch(order.id)}
+                className="p-3 bg-white rounded-xl border border-accent-200 cursor-pointer hover:border-accent-400 hover:shadow-sm transition-all"
+              >
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-primary-50 flex items-center justify-center flex-shrink-0">
+                    <ServiceIcon
+                      type={order.serviceType}
+                      className="w-5 h-5 text-primary-600"
+                    />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="font-medium text-neutral-800 text-sm">
+                        {SERVICE_CONFIG[order.serviceType].name}
+                      </span>
+                      <StatusBadge status={order.status} size="sm" />
+                    </div>
+                    <div className="flex items-center gap-1 text-xs text-neutral-500 mb-1">
+                      <Clock className="w-3 h-3" />
+                      <span>{formatDate(order.scheduledTime, 'MM-dd HH:mm')}</span>
+                    </div>
+                    <div className="flex items-center gap-1 text-xs text-neutral-500">
+                      <MapPin className="w-3 h-3 flex-shrink-0" />
+                      <span className="truncate">{order.address.detail}</span>
+                    </div>
+                    <div className="flex items-center justify-between mt-2">
+                      <span className="text-xs text-neutral-400">
+                        {order.houseArea}㎡ · {order.customer.name}
+                      </span>
+                      <span className="text-primary-600 font-bold text-sm">
+                        ¥{order.price}
+                      </span>
+                    </div>
+                    {order.recurringServiceId && (
+                      <div className="mt-2 flex items-center gap-1">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-600 rounded-md text-xs font-medium">
+                          <RefreshCw className="w-3 h-3" />
+                          定期服务
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {pendingOrders.length > 6 && (
+            <div className="mt-3 text-center">
+              <button
+                onClick={() => navigate('/dispatcher')}
+                className="text-accent-600 text-sm font-medium hover:text-accent-700"
+              >
+                查看全部 {pendingOrders.length} 条待派单 →
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="card">
         <div className="flex items-center justify-between mb-6">
@@ -143,6 +264,7 @@ export const ScheduleBoard: React.FC = () => {
                   const isToday =
                     day.toISOString().slice(0, 10) === new Date().toISOString().slice(0, 10);
                   const dayName = format(day, 'EEE', { locale: zhCN });
+                  const pendingCount = getPendingDateOrders(day).length;
                   return (
                     <th
                       key={day.toISOString()}
@@ -159,13 +281,20 @@ export const ScheduleBoard: React.FC = () => {
                       >
                         {dayName}
                       </div>
-                      <div
-                        className={cn(
-                          'w-8 h-8 rounded-full flex items-center justify-center mx-auto mt-1',
-                          isToday && 'bg-primary-500 text-white font-bold'
+                      <div className="flex items-center justify-center gap-1 mt-1">
+                        <div
+                          className={cn(
+                            'w-8 h-8 rounded-full flex items-center justify-center',
+                            isToday && 'bg-primary-500 text-white font-bold'
+                          )}
+                        >
+                          {format(day, 'd')}
+                        </div>
+                        {pendingCount > 0 && (
+                          <span className="w-5 h-5 rounded-full bg-accent-500 text-white text-xs flex items-center justify-center">
+                            {pendingCount}
+                          </span>
                         )}
-                      >
-                        {format(day, 'd')}
                       </div>
                     </th>
                   );
@@ -173,6 +302,67 @@ export const ScheduleBoard: React.FC = () => {
               </tr>
             </thead>
             <tbody>
+              <tr className="border-b border-dashed border-accent-200 bg-accent-50/30">
+                <td className="sticky left-0 bg-accent-50/30 z-10 p-4">
+                  <div className="flex items-center gap-2">
+                    <div className="w-10 h-10 rounded-full bg-accent-100 flex items-center justify-center">
+                      <AlertCircle className="w-5 h-5 text-accent-600" />
+                    </div>
+                    <div>
+                      <p className="font-medium text-neutral-800 text-sm">待派单</p>
+                      <p className="text-xs text-neutral-500">未分配保洁员</p>
+                    </div>
+                  </div>
+                </td>
+                {weekDays.map((day) => {
+                  const dayPending = getPendingDateOrders(day);
+                  const isToday =
+                    day.toISOString().slice(0, 10) ===
+                    new Date().toISOString().slice(0, 10);
+
+                  return (
+                    <td
+                      key={day.toISOString()}
+                      className={cn('p-2 align-top', isToday && 'bg-primary-50/30')}
+                    >
+                      <div className="space-y-2">
+                        {dayPending.length > 0 ? (
+                          dayPending.map((order) => (
+                            <div
+                              key={order.id}
+                              onClick={() => goToDispatch(order.id)}
+                              className="p-2 rounded-lg border-2 border-dashed border-accent-300 bg-accent-50 text-xs cursor-pointer hover:border-accent-500 hover:bg-accent-100 transition-all"
+                            >
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="font-medium text-accent-700">
+                                  {formatDate(order.scheduledTime).split(' ')[1]}
+                                </span>
+                                {order.recurringServiceId && (
+                                  <RefreshCw className="w-3 h-3 text-accent-500" />
+                                )}
+                              </div>
+                              <p className="font-medium text-neutral-800 mb-1">
+                                {SERVICE_CONFIG[order.serviceType].name}
+                              </p>
+                              <p className="text-neutral-500 line-clamp-1">
+                                {order.address.detail}
+                              </p>
+                              <p className="text-primary-600 font-medium mt-1">
+                                ¥{order.price}
+                              </p>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="h-16 flex items-center justify-center">
+                            <span className="text-xs text-neutral-300">-</span>
+                          </div>
+                        )}
+                      </div>
+                    </td>
+                  );
+                })}
+              </tr>
+
               {displayedCleaners.map((cleaner) => (
                 <tr key={cleaner.id} className="border-b border-neutral-100">
                   <td className="sticky left-0 bg-white z-10 p-4">

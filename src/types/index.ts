@@ -102,6 +102,7 @@ export interface Order {
   status: OrderStatus;
   photos: OrderPhoto[];
   review?: Review;
+  recurringServiceId?: string;
   createdAt: string;
   updatedAt: string;
 }

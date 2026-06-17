@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { Order, CreateOrderRequest, DispatchOrderRequest, SubmitReviewRequest, OrderPhoto, OrderStatus } from '../types';
+import type { Order, CreateOrderRequest, DispatchOrderRequest, SubmitReviewRequest, OrderPhoto, OrderStatus, RecurringService } from '../types';
 import {
   getOrders,
   getOrderById,
@@ -13,6 +13,9 @@ import {
   submitReview,
   uploadPhoto,
   payOrder,
+  createRecurringOrder,
+  cancelRecurringOrders,
+  handleBadReview as handleBadReviewApi,
 } from '../services/orderService';
 
 interface HandleBadReviewRequest {
@@ -45,6 +48,8 @@ interface OrderState {
   pay: (orderId: string) => Promise<void>;
   payOrder: (orderId: string) => Promise<void>;
   handleBadReview: (data: HandleBadReviewRequest) => Promise<void>;
+  createOrderFromRecurring: (recurringService: RecurringService) => Promise<Order | null>;
+  cancelOrdersByRecurringId: (recurringServiceId: string) => Promise<void>;
   clearCurrentOrder: () => void;
 }
 
@@ -60,7 +65,25 @@ export const useOrderStore = create<OrderState>()(
         set({ loading: true, error: null });
         try {
           const response = await getOrders(filters);
-          set({ orders: response.data, loading: false });
+          const serviceOrders = response.data;
+          set((state) => {
+            const persistedMap = new Map(state.orders.map((o) => [o.id, o]));
+            const mergedOrders = serviceOrders.map((so) => {
+              const po = persistedMap.get(so.id);
+              if (po) {
+                const poTime = new Date(po.updatedAt).getTime();
+                const soTime = new Date(so.updatedAt).getTime();
+                if (poTime >= soTime) return po;
+              }
+              return so;
+            });
+            const serviceIds = new Set(serviceOrders.map((o) => o.id));
+            const localOnly = state.orders.filter((o) => !serviceIds.has(o.id));
+            return {
+              orders: [...localOnly, ...mergedOrders],
+              loading: false,
+            };
+          });
         } catch (error) {
           set({ error: '获取订单列表失败', loading: false });
         }
@@ -298,8 +321,47 @@ export const useOrderStore = create<OrderState>()(
                 : state.currentOrder,
             loading: false,
           }));
+
+          try {
+            await handleBadReviewApi(data.reviewId, data.note);
+          } catch (e) {
+            // ignore service sync error since store already updated
+          }
         } catch (error) {
           set({ error: '处理差评失败', loading: false });
+        }
+      },
+
+      createOrderFromRecurring: async (recurringService) => {
+        set({ loading: true, error: null });
+        try {
+          const response = await createRecurringOrder(recurringService);
+          set((state) => ({
+            orders: [response.data, ...state.orders],
+            loading: false,
+          }));
+          return response.data;
+        } catch (error) {
+          set({ error: '创建续单失败', loading: false });
+          return null;
+        }
+      },
+
+      cancelOrdersByRecurringId: async (recurringServiceId) => {
+        set({ loading: true, error: null });
+        try {
+          await cancelRecurringOrders(recurringServiceId);
+          set((state) => ({
+            orders: state.orders.map((o) => {
+              if (o.recurringServiceId === recurringServiceId && o.status === 'pending') {
+                return { ...o, status: 'cancelled' as const, updatedAt: new Date().toISOString() };
+              }
+              return o;
+            }),
+            loading: false,
+          }));
+        } catch (error) {
+          set({ error: '取消关联订单失败', loading: false });
         }
       },
 

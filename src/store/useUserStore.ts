@@ -64,7 +64,21 @@ export const useUserStore = create<UserState>()(
         set({ loading: true, error: null });
         try {
           const response = await getRecurringServices(customerId);
-          set({ recurringServices: response.data, loading: false });
+          const serviceData = response.data;
+          set((state) => {
+            const persistedMap = new Map(state.recurringServices.map((rs) => [rs.id, rs]));
+            const merged = serviceData.map((srs) => {
+              const prs = persistedMap.get(srs.id);
+              if (prs) return prs;
+              return srs;
+            });
+            const serviceIds = new Set(serviceData.map((rs) => rs.id));
+            const localOnly = state.recurringServices.filter((rs) => !serviceIds.has(rs.id));
+            return {
+              recurringServices: [...localOnly, ...merged],
+              loading: false,
+            };
+          });
         } catch (error) {
           set({ error: '获取定期服务失败', loading: false });
         }
@@ -112,15 +126,13 @@ export const useUserStore = create<UserState>()(
       },
 
       toggleRecurring: async (id) => {
-        set({ loading: true, error: null });
         try {
-          await toggleRecurringService(id);
           set((state) => ({
             recurringServices: state.recurringServices.map((rs) =>
               rs.id === id ? { ...rs, isActive: !rs.isActive } : rs
             ),
-            loading: false,
           }));
+          await toggleRecurringService(id);
         } catch (error) {
           set({ error: '更新定期服务失败', loading: false });
         }

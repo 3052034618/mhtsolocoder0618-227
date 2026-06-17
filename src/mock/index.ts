@@ -182,16 +182,16 @@ const generatePhotos = (orderId: string): OrderPhoto[] => {
   return photos;
 };
 
-const generateReview = (orderId: string, rating: number): Review => ({
+const generateReview = (orderId: string, rating: number, forceUnhandled = false): Review => ({
   id: `r-${orderId}`,
   orderId,
   rating,
   content: rating >= 4 ? '服务非常专业，清洁很仔细，下次还会预约！' : '服务不太满意，有些地方没有清洁干净。',
   createdAt: now.toISOString(),
   isBadReview: rating <= 2,
-  handled: rating <= 2,
-  handlerNote: rating <= 2 ? '已联系客户致歉，安排重新清洁' : undefined,
-  handlerId: rating <= 2 ? 'd1' : undefined,
+  handled: rating <= 2 && !forceUnhandled,
+  handlerNote: rating <= 2 && !forceUnhandled ? '已联系客户致歉，安排重新清洁' : undefined,
+  handlerId: rating <= 2 && !forceUnhandled ? 'd1' : undefined,
 });
 
 export const MOCK_ORDERS: Order[] = [
@@ -285,7 +285,7 @@ export const MOCK_ORDERS: Order[] = [
     price: 900,
     status: 'reviewed',
     photos: generatePhotos('o5'),
-    review: generateReview('o5', 2),
+    review: generateReview('o5', 2, true),
     createdAt: '2026-06-15T10:00:00',
     updatedAt: '2026-06-16T20:00:00',
   },

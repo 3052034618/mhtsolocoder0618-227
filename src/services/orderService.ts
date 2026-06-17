@@ -5,6 +5,7 @@ import type {
   CreateOrderRequest,
   DispatchOrderRequest,
   SubmitReviewRequest,
+  RecurringService,
 } from '../types';
 import { MOCK_ORDERS, MOCK_CLEANERS, MOCK_CUSTOMERS } from '../mock';
 import { delay, generateId, generateOrderNo, calculatePrice, calculateCommission } from '../utils';
@@ -355,5 +356,68 @@ export const handleBadReview = async (
     code: 200,
     message: '处理成功',
     data: orders[index],
+  };
+};
+
+export const createRecurringOrder = async (
+  recurringService: RecurringService
+): Promise<ApiResponse<Order>> => {
+  await delay(300);
+
+  const customer = MOCK_CUSTOMERS.find((c) => c.id === recurringService.customerId);
+  if (!customer) {
+    throw new Error('客户不存在');
+  }
+
+  const price = calculatePrice(recurringService.serviceType, recurringService.houseArea);
+  const now = new Date().toISOString();
+  const scheduledTime = `${recurringService.nextOrderDate}T${recurringService.preferredTime}:00`;
+
+  const newOrder: Order = {
+    id: generateId(),
+    orderNo: generateOrderNo(),
+    customerId: customer.id,
+    customer,
+    serviceType: recurringService.serviceType,
+    address: recurringService.address,
+    houseArea: recurringService.houseArea,
+    scheduledTime,
+    price,
+    status: 'pending',
+    photos: [],
+    recurringServiceId: recurringService.id,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  orders = [newOrder, ...orders];
+
+  return {
+    code: 200,
+    message: '自动续单创建成功',
+    data: newOrder,
+  };
+};
+
+export const cancelRecurringOrders = async (
+  recurringServiceId: string
+): Promise<ApiResponse<null>> => {
+  await delay(300);
+
+  orders = orders.map((o) => {
+    if (o.recurringServiceId === recurringServiceId && o.status === 'pending') {
+      return {
+        ...o,
+        status: 'cancelled' as const,
+        updatedAt: new Date().toISOString(),
+      };
+    }
+    return o;
+  });
+
+  return {
+    code: 200,
+    message: '关联订单已取消',
+    data: null,
   };
 };

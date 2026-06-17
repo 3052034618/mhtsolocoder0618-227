@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   ClipboardList,
   Users,
@@ -25,7 +25,9 @@ import type { Order } from '../../types';
 
 export const DispatcherDashboard: React.FC = () => {
   const navigate = useNavigate();
-  const { orders, fetchOrders, assignOrder, loading } = useOrderStore();
+  const [searchParams] = useSearchParams();
+  const { orders, fetchOrders, assignOrder, processChangeRequest, loading } = useOrderStore();
+  const [highlightedOrderId, setHighlightedOrderId] = useState<string | null>(null);
   const { cleaners, fetchCleaners } = useUserStore();
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
   const [recommendedCleaners, setRecommendedCleaners] = useState<
@@ -36,6 +38,22 @@ export const DispatcherDashboard: React.FC = () => {
     fetchOrders();
     fetchCleaners();
   }, []);
+
+  useEffect(() => {
+    const orderId = searchParams.get('orderId');
+    if (orderId && orders.length > 0) {
+      const targetOrder = orders.find(
+        (o) => o.id === orderId && o.status === 'pending'
+      );
+      if (targetOrder) {
+        handleToggleOrder(targetOrder);
+        setHighlightedOrderId(orderId);
+        setTimeout(() => {
+          setHighlightedOrderId(null);
+        }, 3000);
+      }
+    }
+  }, [searchParams, orders]);
 
   const pendingOrders = orders.filter((o) => o.status === 'pending');
   const todayOrders = orders.filter((o) => {
@@ -48,8 +66,19 @@ export const DispatcherDashboard: React.FC = () => {
   const badReviews = orders.filter(
     (o) => o.review && o.review.rating <= 2 && !o.review.handled
   );
+  const changeRequests = orders.filter(
+    (o) => o.changeRequest && o.changeRequest.status === 'pending'
+  );
 
   const availableCleaners = cleaners.filter((c) => c.status === 'available');
+
+  const handleProcessChangeRequest = async (orderId: string, approve: boolean) => {
+    try {
+      await processChangeRequest(orderId, approve);
+    } catch (error) {
+      console.error('Process change request failed:', error);
+    }
+  };
 
   const handleToggleOrder = (order: Order) => {
     if (expandedOrderId === order.id) {
@@ -103,6 +132,94 @@ export const DispatcherDashboard: React.FC = () => {
         />
       </div>
 
+      {changeRequests.length > 0 && (
+        <div className="card border-2 border-dashed border-primary-200 bg-primary-50/30">
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 text-primary-600" />
+              <h2 className="text-xl font-bold text-neutral-800">待处理变更请求</h2>
+              <span className="px-2 py-0.5 bg-primary-500 text-white text-xs rounded-full">
+                {changeRequests.length}
+              </span>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            {changeRequests.map((order) => {
+              const cr = order.changeRequest!;
+              return (
+                <div
+                  key={order.id}
+                  className="p-4 bg-white rounded-xl border border-neutral-100 shadow-sm"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-3 mb-3">
+                        <span className="text-sm font-mono text-neutral-500">
+                          {order.orderNo}
+                        </span>
+                        <span
+                          className={cn(
+                            'px-2 py-0.5 text-xs rounded-full font-medium',
+                            cr.type === 'reschedule'
+                              ? 'bg-accent-50 text-accent-700 border border-accent-100'
+                              : 'bg-danger-50 text-danger-700 border border-danger-100'
+                          )}
+                        >
+                          {cr.type === 'reschedule' ? '改期' : '取消'}
+                        </span>
+                        <span className="text-xs text-neutral-400">
+                          申请时间：{formatDate(cr.createdAt)}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                        <div className="text-sm">
+                          <span className="text-neutral-400">原时间：</span>
+                          <span className="text-neutral-700">
+                            {formatDate(cr.originalScheduledTime || order.scheduledTime)}
+                          </span>
+                        </div>
+                        {cr.newScheduledTime && (
+                          <div className="text-sm">
+                            <span className="text-neutral-400">新时间：</span>
+                            <span className="text-primary-600 font-medium">
+                              {formatDate(cr.newScheduledTime)}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="text-sm">
+                        <span className="text-neutral-400">原因：</span>
+                        <span className="text-neutral-700">{cr.reason}</span>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col gap-2 flex-shrink-0">
+                      <button
+                        onClick={() => handleProcessChangeRequest(order.id, true)}
+                        disabled={loading}
+                        className="px-4 py-2 bg-primary-500 text-white text-sm font-medium rounded-xl hover:bg-primary-600 transition-colors disabled:opacity-50"
+                      >
+                        {loading ? '处理中...' : '批准'}
+                      </button>
+                      <button
+                        onClick={() => handleProcessChangeRequest(order.id, false)}
+                        disabled={loading}
+                        className="px-4 py-2 bg-neutral-100 text-neutral-600 text-sm font-medium rounded-xl hover:bg-neutral-200 transition-colors disabled:opacity-50"
+                      >
+                        拒绝
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2">
           <div className="card">
@@ -126,6 +243,7 @@ export const DispatcherDashboard: React.FC = () => {
                         onClick={() => handleToggleOrder(order)}
                         className={cn(
                           'p-4 border-2 rounded-xl cursor-pointer transition-all',
+                          highlightedOrderId === order.id && 'ring-4 ring-primary-200',
                           isExpanded
                             ? 'border-primary-500 bg-primary-50'
                             : 'border-neutral-100 hover:border-primary-200'

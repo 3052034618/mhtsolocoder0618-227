@@ -72,6 +72,17 @@ export interface OrderPhoto {
   uploadedAt: string;
 }
 
+export type ReviewFollowUpAction = 'contact' | 'reclean' | 'refund' | 'compensate' | 'note' | 'resolve';
+
+export interface ReviewFollowUp {
+  id: string;
+  action: ReviewFollowUpAction;
+  content: string;
+  createdAt: string;
+  operatorId: string;
+  operatorName: string;
+}
+
 export interface Review {
   id: string;
   orderId: string;
@@ -83,6 +94,22 @@ export interface Review {
   handlerNote?: string;
   handlerId?: string;
   action?: string;
+  followUps?: ReviewFollowUp[];
+}
+
+export type ChangeRequestType = 'reschedule' | 'cancel';
+export type ChangeRequestStatus = 'pending' | 'approved' | 'rejected';
+
+export interface OrderChangeRequest {
+  id: string;
+  type: ChangeRequestType;
+  status: ChangeRequestStatus;
+  originalScheduledTime?: string;
+  newScheduledTime?: string;
+  reason: string;
+  createdAt: string;
+  processedAt?: string;
+  processorNote?: string;
 }
 
 export interface Order {
@@ -104,6 +131,7 @@ export interface Order {
   photos: OrderPhoto[];
   review?: Review;
   recurringServiceId?: string;
+  changeRequest?: OrderChangeRequest;
   createdAt: string;
   updatedAt: string;
 }

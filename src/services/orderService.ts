@@ -6,6 +6,9 @@ import type {
   DispatchOrderRequest,
   SubmitReviewRequest,
   RecurringService,
+  OrderChangeRequest,
+  ReviewFollowUp,
+  ReviewFollowUpAction,
 } from '../types';
 import { MOCK_ORDERS, MOCK_CLEANERS, MOCK_CUSTOMERS, MOCK_RECURRING_SERVICES } from '../mock';
 import { delay, generateId, generateOrderNo, calculatePrice, calculateCommission, getFollowingOrderDate } from '../utils';
@@ -522,3 +525,108 @@ export const syncAllRecurringOrders = async (): Promise<ApiResponse<Order[]>> =>
 
   return { code: 200, message: '同步完成', data: created };
 };
+
+export const submitChangeRequest = async (
+  orderId: string,
+  data: { type: 'reschedule' | 'cancel'; newScheduledTime?: string; reason: string }
+): Promise<ApiResponse<Order>> => {
+  await delay(500);
+
+  const index = orders.findIndex((o) => o.id === orderId);
+  if (index === -1) {
+    throw new Error('订单不存在');
+  }
+
+  const changeRequest: OrderChangeRequest = {
+    id: generateId(),
+    type: data.type,
+    status: 'pending',
+    originalScheduledTime: orders[index].scheduledTime,
+    newScheduledTime: data.newScheduledTime,
+    reason: data.reason,
+    createdAt: new Date().toISOString(),
+  };
+
+  orders[index] = {
+    ...orders[index],
+    changeRequest,
+    updatedAt: new Date().toISOString(),
+  };
+
+  return { code: 200, message: '变更申请已提交', data: orders[index] };
+};
+
+export const processChangeRequest = async (
+  orderId: string,
+  approve: boolean,
+  processorNote: string = ''
+): Promise<ApiResponse<Order>> => {
+  await delay(300);
+
+  const index = orders.findIndex((o) => o.id === orderId);
+  if (index === -1 || !orders[index].changeRequest) {
+    throw new Error('变更申请不存在');
+  }
+
+  const cr = orders[index].changeRequest!;
+  const now = new Date().toISOString();
+
+  if (approve) {
+    if (cr.type === 'cancel') {
+      orders[index] = {
+        ...orders[index],
+        status: 'cancelled',
+        scheduledTime: cr.newScheduledTime || orders[index].scheduledTime,
+        changeRequest: { ...cr, status: 'approved', processedAt: now, processorNote },
+        updatedAt: now,
+      };
+    } else {
+      orders[index] = {
+        ...orders[index],
+        scheduledTime: cr.newScheduledTime || orders[index].scheduledTime,
+        changeRequest: { ...cr, status: 'approved', processedAt: now, processorNote },
+        updatedAt: now,
+      };
+    }
+  } else {
+    orders[index] = {
+      ...orders[index],
+      changeRequest: { ...cr, status: 'rejected', processedAt: now, processorNote },
+      updatedAt: now,
+    };
+  }
+
+  return { code: 200, message: approve ? '变更已批准' : '变更已拒绝', data: orders[index] };
+};
+
+export const addReviewFollowUp = async (
+  reviewId: string,
+  data: { action: ReviewFollowUpAction; content: string; operatorId: string; operatorName: string }
+): Promise<ApiResponse<ReviewFollowUp>> => {
+  await delay(300);
+
+  const followUp: ReviewFollowUp = {
+    id: generateId(),
+    action: data.action,
+    content: data.content,
+    createdAt: new Date().toISOString(),
+    operatorId: data.operatorId,
+    operatorName: data.operatorName,
+  };
+
+  const index = orders.findIndex((o) => o.review?.id === reviewId);
+  if (index !== -1 && orders[index].review) {
+    const existingFollowUps = orders[index].review!.followUps || [];
+    orders[index] = {
+      ...orders[index],
+      review: {
+        ...orders[index].review!,
+        followUps: [...existingFollowUps, followUp],
+      },
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  return { code: 200, message: '记录已添加', data: followUp };
+};
+

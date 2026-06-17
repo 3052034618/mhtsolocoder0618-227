@@ -12,25 +12,96 @@ import {
   ChevronUp,
   XCircle,
   RefreshCw,
+  Phone,
+  Gift,
+  FileText,
+  Sparkles,
+  Undo2,
 } from 'lucide-react';
 import { useOrderStore } from '../../store/useOrderStore';
 import { useAuthStore } from '../../store/useAuthStore';
 import { StarRating } from '../../components/ui/StarRating';
 import { formatDate, cn } from '../../utils';
-import { SERVICE_CONFIG } from '../../types';
+import { SERVICE_CONFIG, type ReviewFollowUpAction } from '../../types';
 
 type TabType = 'pending' | 'handled';
+
+const FOLLOW_UP_CONFIG: Record<
+  ReviewFollowUpAction,
+  { label: string; color: string; bgColor: string; icon: React.ComponentType<{ className?: string }> }
+> = {
+  contact: {
+    label: '联系客户',
+    color: 'text-blue-600',
+    bgColor: 'bg-blue-100',
+    icon: Phone,
+  },
+  reclean: {
+    label: '重新清洁',
+    color: 'text-purple-600',
+    bgColor: 'bg-purple-100',
+    icon: Sparkles,
+  },
+  refund: {
+    label: '退款',
+    color: 'text-orange-600',
+    bgColor: 'bg-orange-100',
+    icon: Undo2,
+  },
+  compensate: {
+    label: '补偿',
+    color: 'text-pink-600',
+    bgColor: 'bg-pink-100',
+    icon: Gift,
+  },
+  note: {
+    label: '备注',
+    color: 'text-neutral-600',
+    bgColor: 'bg-neutral-100',
+    icon: FileText,
+  },
+  resolve: {
+    label: '已解决',
+    color: 'text-green-600',
+    bgColor: 'bg-green-100',
+    icon: CheckCircle,
+  },
+};
+
+const isReviewResolved = (review: {
+  handled?: boolean;
+  action?: string;
+  followUps?: { action: ReviewFollowUpAction }[];
+}): boolean => {
+  if (review.handled === true) return true;
+  if (review.followUps?.some((f) => f.action === 'resolve')) return true;
+  return false;
+};
+
+const mapLegacyAction = (action: string): ReviewFollowUpAction => {
+  switch (action) {
+    case 're_service':
+      return 'reclean';
+    case 'refund':
+      return 'refund';
+    case 'compensate':
+      return 'compensate';
+    case 'other':
+    default:
+      return 'note';
+  }
+};
 
 export const ReviewManagement: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { orders, fetchOrders, handleBadReview, loading } = useOrderStore();
+  const { orders, fetchOrders, handleBadReview, addReviewFollowUp, loading } = useOrderStore();
   const { user } = useAuthStore();
   const [activeTab, setActiveTab] = useState<TabType>('pending');
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
-  const [selectedAction, setSelectedAction] = useState<'refund' | 're_service' | 'compensate' | 'other'>('re_service');
-  const [note, setNote] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+  const [followUpActionMap, setFollowUpActionMap] = useState<Record<string, ReviewFollowUpAction>>({});
+  const [followUpContentMap, setFollowUpContentMap] = useState<Record<string, string>>({});
+  const [submittingMap, setSubmittingMap] = useState<Record<string, boolean>>({});
   const [highlightedOrderId, setHighlightedOrderId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -47,7 +118,7 @@ export const ReviewManagement: React.FC = () => {
         (o) => o.id === orderId || o.review?.id === reviewId
       );
       if (targetOrder && targetOrder.review) {
-        const isHandled = targetOrder.review.handled;
+        const isHandled = isReviewResolved(targetOrder.review);
         setActiveTab(isHandled ? 'handled' : 'pending');
         setExpandedOrderId(targetOrder.id);
         setHighlightedOrderId(targetOrder.id);
@@ -70,8 +141,8 @@ export const ReviewManagement: React.FC = () => {
     (o) => o.review && o.review.isBadReview
   );
 
-  const pendingReviews = badReviewOrders.filter((o) => !o.review?.handled);
-  const handledReviews = badReviewOrders.filter((o) => o.review?.handled);
+  const pendingReviews = badReviewOrders.filter((o) => !isReviewResolved(o.review!));
+  const handledReviews = badReviewOrders.filter((o) => isReviewResolved(o.review!));
 
   const displayedOrders = activeTab === 'pending' ? pendingReviews : handledReviews;
 
@@ -80,33 +151,107 @@ export const ReviewManagement: React.FC = () => {
       setExpandedOrderId(null);
     } else {
       setExpandedOrderId(orderId);
-      const order = orders.find((o) => o.id === orderId);
-      if (order?.review?.handled) {
-        setSelectedAction('re_service');
-        setNote('');
-      }
     }
   };
 
-  const handleSubmit = async (orderId: string) => {
+  const getFollowUpAction = (orderId: string): ReviewFollowUpAction =>
+    followUpActionMap[orderId] || 'contact';
+
+  const setFollowUpAction = (orderId: string, action: ReviewFollowUpAction) => {
+    setFollowUpActionMap((prev) => ({ ...prev, [orderId]: action }));
+  };
+
+  const getFollowUpContent = (orderId: string): string =>
+    followUpContentMap[orderId] || '';
+
+  const setFollowUpContent = (orderId: string, content: string) => {
+    setFollowUpContentMap((prev) => ({ ...prev, [orderId]: content }));
+  };
+
+  const getSubmitting = (orderId: string): boolean => !!submittingMap[orderId];
+
+  const setSubmitting = (orderId: string, value: boolean) => {
+    setSubmittingMap((prev) => ({ ...prev, [orderId]: value }));
+  };
+
+  const handleAddFollowUp = async (orderId: string) => {
     const order = orders.find((o) => o.id === orderId);
     if (!order?.review) return;
 
-    setSubmitting(true);
+    const action = getFollowUpAction(orderId);
+    const content = getFollowUpContent(orderId).trim();
+    if (!content) return;
+
+    setSubmitting(orderId, true);
     try {
-      await handleBadReview({
-        reviewId: order.review.id,
-        action: selectedAction,
-        note,
-        handlerId: user?.id || 'd1',
+      const operatorId = user?.id || 'd1';
+      const operatorName = user?.name || '调度员';
+      await addReviewFollowUp(order.review.id, {
+        action,
+        content,
+        operatorId,
+        operatorName,
       });
-      setExpandedOrderId(null);
-      setNote('');
-      setSubmitting(false);
+      setFollowUpAction(orderId, 'contact');
+      setFollowUpContent(orderId, '');
     } catch (error) {
-      console.error('Handle bad review failed:', error);
-      setSubmitting(false);
+      console.error('Add follow up failed:', error);
+    } finally {
+      setSubmitting(orderId, false);
     }
+  };
+
+  const buildTimelineEntries = (order: {
+    review?: {
+      action?: string;
+      handlerNote?: string;
+      handlerId?: string;
+      handled?: boolean;
+      handledAt?: string;
+      createdAt?: string;
+      followUps?: {
+        id: string;
+        action: ReviewFollowUpAction;
+        content: string;
+        createdAt: string;
+        operatorId: string;
+        operatorName: string;
+      }[];
+    };
+  }) => {
+    const review = order.review;
+    if (!review) return [];
+
+    const entries: {
+      id: string;
+      action: ReviewFollowUpAction;
+      content: string;
+      createdAt: string;
+      operatorId: string;
+      operatorName: string;
+      isLegacy?: boolean;
+    }[] = [];
+
+    if (review.action || review.handlerNote || review.handled) {
+      const legacyAction = review.action ? mapLegacyAction(review.action) : 'resolve';
+      entries.push({
+        id: 'legacy-handle',
+        action: legacyAction,
+        content: review.handlerNote || '已处理',
+        createdAt: review.handledAt || review.createdAt || new Date().toISOString(),
+        operatorId: review.handlerId || 'd1',
+        operatorName: '调度员',
+        isLegacy: true,
+      });
+    }
+
+    if (review.followUps && review.followUps.length > 0) {
+      entries.push(...review.followUps);
+    }
+
+    entries.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+    return entries;
   };
 
   return (
@@ -230,6 +375,8 @@ export const ReviewManagement: React.FC = () => {
                 const review = order.review!;
                 const isExpanded = expandedOrderId === order.id;
                 const isHighlighted = highlightedOrderId === order.id;
+                const isResolved = isReviewResolved(review);
+                const timelineEntries = buildTimelineEntries(order);
 
                 return (
                   <div
@@ -252,10 +399,10 @@ export const ReviewManagement: React.FC = () => {
                           <div
                             className={cn(
                               'w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0',
-                              review.handled ? 'bg-primary-100' : 'bg-danger-100'
+                              isResolved ? 'bg-primary-100' : 'bg-danger-100'
                             )}
                           >
-                            {review.handled ? (
+                            {isResolved ? (
                               <CheckCircle className="w-6 h-6 text-primary-600" />
                             ) : (
                               <AlertTriangle className="w-6 h-6 text-danger-600" />
@@ -285,7 +432,7 @@ export const ReviewManagement: React.FC = () => {
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
-                          {review.handled ? (
+                          {isResolved ? (
                             <span className="px-3 py-1 bg-primary-100 text-primary-600 rounded-full text-sm font-medium">
                               已处理
                             </span>
@@ -304,8 +451,8 @@ export const ReviewManagement: React.FC = () => {
                     </div>
 
                     {isExpanded && (
-                      <div className="px-4 pb-4 border-t border-neutral-100 pt-4 animate-fade-in">
-                        <div className="bg-neutral-50 rounded-xl p-4 mb-4">
+                      <div className="px-4 pb-4 border-t border-neutral-100 pt-4 animate-fade-in space-y-4">
+                        <div className="bg-neutral-50 rounded-xl p-4">
                           <div className="flex items-center gap-2 mb-2">
                             <MessageSquare className="w-4 h-4 text-neutral-400" />
                             <span className="text-sm font-medium text-neutral-700">
@@ -316,7 +463,7 @@ export const ReviewManagement: React.FC = () => {
                         </div>
 
                         {order.cleaner && (
-                          <div className="flex items-center gap-3 p-3 bg-neutral-50 rounded-xl mb-4">
+                          <div className="flex items-center gap-3 p-3 bg-neutral-50 rounded-xl">
                             <img
                               src={order.cleaner.avatar}
                               alt={order.cleaner.name}
@@ -340,131 +487,141 @@ export const ReviewManagement: React.FC = () => {
                           </div>
                         )}
 
-                        {review.handled ? (
-                          <div className="bg-primary-50 rounded-xl p-4 border border-primary-200">
-                            <div className="flex items-center gap-2 mb-3">
-                              <CheckCircle className="w-5 h-5 text-primary-600" />
-                              <span className="font-medium text-primary-700">
-                                处理结果
-                              </span>
-                            </div>
-                            <div className="space-y-2">
-                              <div className="flex items-center gap-2">
-                                <span className="text-sm text-neutral-500">
-                                  处理方式：
-                                </span>
-                                <span className="text-sm font-medium text-neutral-800">
-                                  {review.action === 're_service' && '重新清洁'}
-                                  {review.action === 'refund' && '部分退款'}
-                                  {review.action === 'compensate' && '致歉补偿'}
-                                  {review.action === 'other' && '其他处理'}
-                                  {!review.action && '致歉补偿'}
-                                </span>
-                              </div>
-                              <div>
-                                <span className="text-sm text-neutral-500">
-                                  处理备注：
-                                </span>
-                                <p className="text-sm text-neutral-700 mt-1">
-                                  {review.handlerNote || '无'}
-                                </p>
-                              </div>
-                              {review.handlerId && (
-                                <div className="text-xs text-neutral-400">
-                                  处理人：调度员
-                                </div>
-                              )}
-                            </div>
+                        <div>
+                          <div className="flex items-center gap-2 mb-3">
+                            <Clock className="w-4 h-4 text-neutral-400" />
+                            <span className="text-sm font-medium text-neutral-700">
+                              跟进记录
+                            </span>
+                            <span className="text-xs text-neutral-400">
+                              ({timelineEntries.length})
+                            </span>
                           </div>
-                        ) : (
-                          <div className="space-y-4">
+
+                          {timelineEntries.length > 0 ? (
+                            <div className="relative pl-8">
+                              <div className="absolute left-[11px] top-2 bottom-2 w-0.5 bg-neutral-200" />
+                              <div className="space-y-5">
+                                {timelineEntries.map((entry, idx) => {
+                                  const config = FOLLOW_UP_CONFIG[entry.action];
+                                  const IconComp = config.icon;
+                                  const isLast = idx === timelineEntries.length - 1;
+                                  return (
+                                    <div key={entry.id} className="relative">
+                                      <div
+                                        className={cn(
+                                          'absolute -left-8 w-6 h-6 rounded-full flex items-center justify-center ring-4 ring-white',
+                                          config.bgColor
+                                        )}
+                                        style={{ top: '2px' }}
+                                      >
+                                        <IconComp className={cn('w-3.5 h-3.5', config.color)} />
+                                      </div>
+                                      <div className="flex flex-wrap items-center gap-2 mb-1">
+                                        <span className={cn('font-medium text-sm', config.color)}>
+                                          {config.label}
+                                        </span>
+                                        <span className="text-neutral-300 text-xs">|</span>
+                                        <span className="text-sm text-neutral-600 flex items-center gap-1">
+                                          <User className="w-3.5 h-3.5" />
+                                          {entry.operatorName}
+                                        </span>
+                                        <span className="text-neutral-300 text-xs">|</span>
+                                        <span className="text-xs text-neutral-400">
+                                          {formatDate(entry.createdAt)}
+                                        </span>
+                                      </div>
+                                      <p className="text-sm text-neutral-600 leading-relaxed whitespace-pre-wrap">
+                                        {entry.content}
+                                      </p>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="bg-neutral-50 rounded-xl p-4 text-center text-sm text-neutral-400">
+                              暂无跟进记录
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="border-t border-neutral-100 pt-4">
+                          <div className="text-sm font-medium text-neutral-700 mb-3">
+                            追加跟进记录
+                          </div>
+                          <div className="space-y-3">
                             <div>
-                              <label className="label">处理方式</label>
-                              <div className="grid grid-cols-2 gap-3">
-                                {([
-                                  {
-                                    value: 're_service' as const,
-                                    label: '重新清洁',
-                                    desc: '安排再次上门清洁',
-                                  },
-                                  {
-                                    value: 'refund' as const,
-                                    label: '部分退款',
-                                    desc: '退还部分服务费用',
-                                  },
-                                  {
-                                    value: 'compensate' as const,
-                                    label: '致歉补偿',
-                                    desc: '联系客户致歉补偿',
-                                  },
-                                  {
-                                    value: 'other' as const,
-                                    label: '其他处理',
-                                    desc: '其他处理方式',
-                                  },
-                                ]).map((action) => (
-                                  <div
-                                    key={action.value}
-                                    onClick={() => setSelectedAction(action.value)}
-                                    className={cn(
-                                      'p-3 border-2 rounded-xl cursor-pointer transition-all',
-                                      selectedAction === action.value
-                                        ? 'border-primary-500 bg-primary-50'
-                                        : 'border-neutral-200 hover:border-primary-200'
-                                    )}
-                                  >
-                                    <p className="font-medium text-neutral-800 text-sm">
-                                      {action.label}
-                                    </p>
-                                    <p className="text-xs text-neutral-500 mt-1">
-                                      {action.desc}
-                                    </p>
-                                  </div>
-                                ))}
+                              <label className="label">操作类型</label>
+                              <div className="grid grid-cols-3 gap-2">
+                                {(Object.keys(FOLLOW_UP_CONFIG) as ReviewFollowUpAction[]).map(
+                                  (actionKey) => {
+                                    const config = FOLLOW_UP_CONFIG[actionKey];
+                                    const IconComp = config.icon;
+                                    const isSelected = getFollowUpAction(order.id) === actionKey;
+                                    return (
+                                      <div
+                                        key={actionKey}
+                                        onClick={() => setFollowUpAction(order.id, actionKey)}
+                                        className={cn(
+                                          'p-2.5 border-2 rounded-xl cursor-pointer transition-all flex items-center gap-2',
+                                          isSelected
+                                            ? cn('border-current', config.color, 'bg-opacity-5', config.bgColor)
+                                            : 'border-neutral-200 hover:border-neutral-300'
+                                        )}
+                                      >
+                                        <IconComp className={cn('w-4 h-4', isSelected ? config.color : 'text-neutral-400')} />
+                                        <span className={cn('text-sm font-medium', isSelected ? config.color : 'text-neutral-600')}>
+                                          {config.label}
+                                        </span>
+                                      </div>
+                                    );
+                                  }
+                                )}
                               </div>
                             </div>
 
                             <div>
                               <label className="label">
                                 <MessageSquare className="w-4 h-4 inline mr-2" />
-                                处理备注
+                                记录内容
                               </label>
                               <textarea
-                                value={note}
-                                onChange={(e) => setNote(e.target.value)}
-                                placeholder="请输入处理备注..."
-                                className="input-field min-h-[100px] resize-none"
+                                value={getFollowUpContent(order.id)}
+                                onChange={(e) => setFollowUpContent(order.id, e.target.value)}
+                                placeholder="请输入跟进记录内容..."
+                                className="input-field min-h-[90px] resize-none"
                               />
                             </div>
 
                             <div className="flex gap-3">
                               <button
                                 onClick={() => {
-                                  setExpandedOrderId(null);
-                                  setNote('');
+                                  setFollowUpAction(order.id, 'contact');
+                                  setFollowUpContent(order.id, '');
                                 }}
                                 className="flex-1 btn-secondary"
                               >
-                                取消
+                                清空
                               </button>
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  handleSubmit(order.id);
+                                  handleAddFollowUp(order.id);
                                 }}
-                                disabled={submitting}
+                                disabled={getSubmitting(order.id) || !getFollowUpContent(order.id).trim()}
                                 className="flex-1 btn-primary flex items-center justify-center gap-2"
                               >
-                                {submitting ? (
+                                {getSubmitting(order.id) ? (
                                   <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                                 ) : (
                                   <Send className="w-4 h-4" />
                                 )}
-                                提交处理
+                                追加记录
                               </button>
                             </div>
                           </div>
-                        )}
+                        </div>
                       </div>
                     )}
                   </div>

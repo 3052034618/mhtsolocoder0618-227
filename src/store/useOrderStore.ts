@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { Order, CreateOrderRequest, DispatchOrderRequest, SubmitReviewRequest, OrderPhoto, OrderStatus, RecurringService } from '../types';
+import type { Order, CreateOrderRequest, DispatchOrderRequest, SubmitReviewRequest, OrderPhoto, OrderStatus, RecurringService, ReviewFollowUp, ReviewFollowUpAction } from '../types';
 import {
   getOrders,
   getOrderById,
@@ -18,6 +18,9 @@ import {
   handleBadReview as handleBadReviewApi,
   generateNextRecurringOrder as generateNextRecurringOrderApi,
   syncAllRecurringOrders as syncAllRecurringOrdersApi,
+  submitChangeRequest as submitChangeRequestApi,
+  processChangeRequest as processChangeRequestApi,
+  addReviewFollowUp as addReviewFollowUpApi,
 } from '../services/orderService';
 
 interface HandleBadReviewRequest {
@@ -54,6 +57,9 @@ interface OrderState {
   cancelOrdersByRecurringId: (recurringServiceId: string) => Promise<void>;
   generateNextRecurringOrder: (recurringServiceId: string) => Promise<Order | null>;
   syncAllRecurringOrders: () => Promise<Order[]>;
+  submitChangeRequest: (orderId: string, data: { type: 'reschedule' | 'cancel'; newScheduledTime?: string; reason: string }) => Promise<void>;
+  processChangeRequest: (orderId: string, approve: boolean, processorNote?: string) => Promise<void>;
+  addReviewFollowUp: (reviewId: string, data: { action: ReviewFollowUpAction; content: string; operatorId: string; operatorName: string }) => Promise<ReviewFollowUp | null>;
   clearCurrentOrder: () => void;
 }
 
@@ -382,6 +388,38 @@ export const useOrderStore = create<OrderState>()(
         }
       },
 
+      submitChangeRequest: async (orderId, data) => {
+        set({ loading: true, error: null });
+        try {
+          const response = await submitChangeRequestApi(orderId, data);
+          set((state) => ({
+            orders: state.orders.map((o) =>
+              o.id === orderId ? response.data : o
+            ),
+            currentOrder:
+              state.currentOrder?.id === orderId ? response.data : state.currentOrder,
+            loading: false,
+          }));
+        } catch (error) {
+          set({ error: '提交变更申请失败', loading: false });
+        }
+      },
+
+      processChangeRequest: async (orderId, approve, processorNote) => {
+        set({ loading: true, error: null });
+        try {
+          const response = await processChangeRequestApi(orderId, approve, processorNote);
+          set((state) => ({
+            orders: state.orders.map((o) =>
+              o.id === orderId ? response.data : o
+            ),
+            loading: false,
+          }));
+        } catch (error) {
+          set({ error: '处理变更失败', loading: false });
+        }
+      },
+
       generateNextRecurringOrder: async (recurringServiceId) => {
         try {
           const response = await generateNextRecurringOrderApi(recurringServiceId);
@@ -411,6 +449,41 @@ export const useOrderStore = create<OrderState>()(
         } catch (error) {
           set({ error: '同步续单失败' });
           return [];
+        }
+      },
+
+      addReviewFollowUp: async (reviewId, data) => {
+        try {
+          const response = await addReviewFollowUpApi(reviewId, data);
+          set((state) => ({
+            orders: state.orders.map((o) => {
+              if (o.review?.id === reviewId) {
+                const existing = o.review!.followUps || [];
+                return {
+                  ...o,
+                  review: {
+                    ...o.review!,
+                    followUps: [...existing, response.data],
+                  },
+                };
+              }
+              return o;
+            }),
+            currentOrder:
+              state.currentOrder?.review?.id === reviewId
+                ? {
+                    ...state.currentOrder!,
+                    review: {
+                      ...state.currentOrder!.review!,
+                      followUps: [...(state.currentOrder!.review!.followUps || []), response.data],
+                    },
+                  }
+                : state.currentOrder,
+          }));
+          return response.data;
+        } catch (error) {
+          set({ error: '添加跟进记录失败' });
+          return null;
         }
       },
 
